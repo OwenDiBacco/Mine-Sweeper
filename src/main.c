@@ -33,10 +33,10 @@ static void freeBoard (GtkWidget* widget, gpointer data)
         free (board->tiles[row]);
     free (board->tiles);
 
+    g_source_remove (board->timeout);
+
     free (board->stopwatch);
     free (board);
-
-    g_source_remove (board->timeout);
 }
 
 gboolean updateStopwatch (gpointer data)
@@ -49,6 +49,17 @@ gboolean updateStopwatch (gpointer data)
         stopwatch->vmt.update (stopwatch);
 
     return true;
+}
+
+static void findStart (board_t* board)
+{
+    for (size_t row = 0; row < board->rows; ++row)
+        for (size_t col = 0; col < board->cols; ++col)
+            if (board->tiles[row][col]->config.adjacentMineCount == 0 && !board->tiles[row][col]->config.mine)
+            {
+                board->tiles[row][col]->visible = true;
+                return;
+            }
 }
 
 static void updateTile (GtkWidget* widget, gpointer data)
@@ -64,39 +75,43 @@ static void updateBoard (GtkWidget* widget, gpointer data)
     (void) widget;
     board_t* board = data;
 
-    size_t tileCount = 0;
+    bool update = false;
 
-    if (board->stopwatch->incrementing)
+    do
     {
-        for (size_t row = 0; row < board->rows; ++row)
+        update = false;
+        size_t tileCount = 0;
+
+        if (board->stopwatch->incrementing)
         {
-            for (size_t col = 0; col < board->cols; ++col)
+            for (ssize_t row = 0; row < board->rows; ++row)
             {
+                for (ssize_t col = 0; col < board->cols; ++col)
+                {
+                    // Reveals hidden clear tiles that are adjacent to visible clear tiles
+                    if (board->tiles[row][col]->config.adjacentMineCount == 0 && board->tiles[row][col]->visible && !board->tiles[row][col]->config.mine)
+                        for (ssize_t r = row - 1; r <= row + 1; ++r)
+                            for (ssize_t c = col - 1; c <= col + 1; ++c)
+                                if ((r >= 0 && r < board->rows) && (c >= 0 && c < board->cols) && !board->tiles[r][c]->visible)
+                                    board->tiles[r][c]->visible = update = true;
 
-                // Reveals hidden clear tiles that are adjacent to visible clear tiles
-                if (board->tiles[row][col]->config.adjacentMineCount == 0 && board->tiles[row][col]->visible)
-                    for (ssize_t r = row - 1; r <= row + 1; ++r)
-                        for (ssize_t c = col - 1; c <= col + 1; ++c)
-                            if ((r >= 0 && r < board->rows) && (c >= 0 && c < board->cols))
-                                if (board->tiles[r][c]->config.adjacentMineCount == 0)
-                                    board->tiles[r][c]->visible = true;
+                    board->tiles[row][col]->vmt.update (board->tiles[row][col]);
 
-                board->tiles[row][col]->vmt.update (board->tiles[row][col]);
+                    // Checks for Loss
+                    if (board->tiles[row][col]->visible && board->tiles[row][col]->config.mine)
+                        board->stopwatch->incrementing = false;
 
-                // Checks for Loss
-                if (board->tiles[row][col]->visible && board->tiles[row][col]->config.mine)
-                    board->stopwatch->incrementing = false;
-
-                else if (board->tiles[row][col]->visible)
-                    ++tileCount;
+                    else if (board->tiles[row][col]->visible)
+                        ++tileCount;
+                }
             }
-        }
 
-        // Checks for Win
-        if (board->tileCount == tileCount)
-            // TODO: save high score to S3 Bucket
-            board->stopwatch->incrementing = false;
-    }
+            // Checks for Win
+            if (board->tileCount == tileCount)
+                // TODO: save high score to S3 Bucket
+                board->stopwatch->incrementing = false;
+        }
+    } while (update && board->stopwatch->incrementing);
 }
 
 size_t boardInit (GtkWidget* window, board_t* board)
@@ -139,12 +154,12 @@ size_t boardInit (GtkWidget* window, board_t* board)
     for (size_t row = 0; row < board->rows; ++row) {
         for (size_t col = 0; col < board->cols; ++col) {
 
-            bool mine = rand () % 8;
-            if (!mine) --board->tileCount;
+            bool mine = (rand() % 8 == 0);
+            if (mine) --board->tileCount;
 
             board->tiles[row][col] = tileInit (&(tileConfig_t)
             {
-                .mine = !mine,
+                .mine = mine,
                 .adjacentMineCount = 0
             });
 
@@ -156,13 +171,16 @@ size_t boardInit (GtkWidget* window, board_t* board)
     }
 
     // Sets the Adjacent Mine Count of each Tile
-    for (size_t row = 0; row < board->rows; ++row)
-        for (size_t col = 0; col < board->cols; ++col)
+    for (ssize_t row = 0; row < board->rows; ++row)
+        for (ssize_t col = 0; col < board->cols; ++col)
             if (board->tiles[row][col]->config.mine)
                 for (ssize_t r = row - 1; r <= row + 1; ++r)
                     for (ssize_t c = col - 1; c <= col + 1; ++c)
                         if ((r >= 0 && r < board->rows) && (c >= 0 && c < board->cols))
                             board->tiles[r][c]->config.adjacentMineCount += 1;
+
+    findStart (board);
+    updateBoard (NULL, board);
 
     return 0;
 }
