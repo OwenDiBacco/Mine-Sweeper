@@ -38,6 +38,10 @@ typedef struct
 
 } stopwatch_t;
 
+char* formatTime (struct timespec time);
+
+struct timespec stopwatchGetDelta (const struct timespec* currentTime, const struct timespec* startTime);
+
 stopwatch_t* stopwatchInit (stopwatchConfig_t* config);
 
 #endif // STOPWATCH_H

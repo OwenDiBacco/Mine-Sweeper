@@ -1,7 +1,22 @@
 // Header
 #include "stopwatch.h"
 
-static struct timespec getDelta (const struct timespec* currentTime, const struct timespec* startTime)
+char* formatTime (struct timespec time)
+{
+    char* formattedTime = malloc (strlen ("00:00:000") + 1);
+	if (formattedTime == NULL)
+		return NULL;
+
+    sprintf (formattedTime, "%02lu:%02lu:%03lu",
+	    (unsigned long) (time.tv_sec / 60),
+		(unsigned long) (time.tv_sec % 60),
+		(unsigned long) (time.tv_nsec / 1000000)
+	);
+
+    return formattedTime;
+}
+
+struct timespec stopwatchGetDelta (const struct timespec* currentTime, const struct timespec* startTime)
 {
 	struct timespec delta =
 	{
@@ -23,18 +38,9 @@ static void update (void* widget)
     stopwatch_t* stopwatch = widget;
 
     clock_gettime (CLOCK_REALTIME, &stopwatch->currentTime);
-    struct timespec delta = getDelta (&stopwatch->currentTime, &stopwatch->startTime);
+    struct timespec delta = stopwatchGetDelta (&stopwatch->currentTime, &stopwatch->startTime);
 
-    char* time = malloc (strlen ("00:00:000") + 1);
-	if (time == NULL)
-		return;
-
-    sprintf (time, "%02lu:%02lu:%03lu",
-	    (unsigned long) (delta.tv_sec / 60),
-		(unsigned long) (delta.tv_sec % 60),
-		(unsigned long) (delta.tv_nsec / 1000000)
-	);
-
+    char* time = formatTime (delta);
     gtk_label_set_text (GTK_LABEL (stopwatch->stopwatch), time);
 
     free (time);

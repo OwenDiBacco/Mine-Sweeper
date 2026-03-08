@@ -1,10 +1,26 @@
 // Headers
 #include "tile.h"
 #include "stopwatch.h"
+#include "dynamoDB_access.h"
 
 // Includes
 #include <stdio.h>
 #include <gtk/gtk.h>
+
+// Macros
+#define TIMESPEC_TO_SIZE_T(ts) ((size_t)((ts).tv_sec))
+
+#define SIZE_T_TO_TIMESPEC(sec) ((struct timespec){ .tv_sec = (sec), .tv_nsec = 0 })
+
+typedef struct
+{
+    char* name;
+    size_t score;
+
+    // Indicates that name has been dynamically allocated
+    bool nameDynamic;
+
+} highScore_t;
 
 typedef struct
 {
@@ -19,7 +35,29 @@ typedef struct
     stopwatch_t* stopwatch;
     guint timeout;
 
+    highScore_t* highScore;
+
 } board_t;
+
+static char* promptName ()
+{
+    size_t bufferSize = 64;
+
+    char* name = malloc(bufferSize);
+    if (name == NULL)
+        return NULL;
+
+    printf("New High Score!\n");
+    printf("Please enter your name: ");
+
+    if (fgets(name, bufferSize, stdin) != NULL)
+    {
+        name [strcspn(name, "\n")] = '\0';
+        return name;
+    }
+
+    return name ;
+}
 
 static void freeBoard (GtkWidget* widget, gpointer data)
 {
@@ -35,6 +73,10 @@ static void freeBoard (GtkWidget* widget, gpointer data)
 
     g_source_remove (board->timeout);
 
+    if (board->highScore->nameDynamic)
+        free (board->highScore->name);
+
+    free (board->highScore);
     free (board->stopwatch);
     free (board);
 }
@@ -108,15 +150,37 @@ static void updateBoard (GtkWidget* widget, gpointer data)
 
             // Checks for Win
             if (board->tileCount == tileCount)
-                // TODO: save high score to S3 Bucket
+            {
                 board->stopwatch->incrementing = false;
+                size_t score = TIMESPEC_TO_SIZE_T (stopwatchGetDelta (&board->stopwatch->currentTime, &board->stopwatch->startTime));
+
+                if (score < board->highScore->score || board->highScore->score == 0)
+                {
+                    board->highScore->score = score;
+                    board->highScore->name = promptName ();
+                    board->highScore->nameDynamic = true;
+                    dbSetHighScore (board->highScore->name, board->highScore->score);
+                }
+            }
         }
+
     } while (update && board->stopwatch->incrementing);
 }
 
 size_t boardInit (GtkWidget* window, board_t* board)
 {
+    char* name = "";
+    size_t score = 0;
+
     srand (time (NULL));
+
+    board->highScore = malloc (sizeof (highScore_t));
+    if (board->highScore == NULL)
+        return -1;
+
+    dbGetHighScore (&name, &score);
+    board->highScore->name = name;
+    board->highScore->score = score;
 
     board->grid = gtk_grid_new ();
     gtk_window_set_child (GTK_WINDOW (window), board->grid);
@@ -130,6 +194,32 @@ size_t boardInit (GtkWidget* window, board_t* board)
     });
 
     gtk_grid_attach (GTK_GRID (board->grid), board->stopwatch->stopwatch, 4, 0, 1, 1);
+
+    // Displays the Highscore
+
+    GtkWidget* highScoreLabel;
+    GtkWidget* highScoreTitle = gtk_label_new ("High Score: ");
+    gtk_grid_attach (GTK_GRID (board->grid), highScoreTitle, 6, 0, 1, 1);
+
+    if (board->highScore->score == 0)
+    {
+        board->highScore->nameDynamic = false;
+        highScoreLabel = gtk_label_new ("--:--:---");
+        gtk_grid_attach (GTK_GRID (board->grid), highScoreLabel, 7, 0, 1, 1);
+    }
+    else
+    {
+        board->highScore->nameDynamic = true;
+        char* highScore = formatTime (SIZE_T_TO_TIMESPEC (board->highScore->score));
+
+        highScoreLabel = gtk_label_new (highScore);
+        GtkWidget* nameLabel = gtk_label_new (board->highScore->name);
+
+        gtk_grid_attach (GTK_GRID (board->grid), nameLabel, 7, 0, 1, 1);
+        gtk_grid_attach (GTK_GRID (board->grid), highScoreLabel, 8, 0, 1, 1);
+
+        free (highScore);
+    }
 
     // Creates the Board
 
@@ -204,6 +294,7 @@ static void activate (GtkApplication *app, gpointer user_data)
     board->timeout = g_timeout_add (16, updateStopwatch, board->stopwatch);
     g_signal_connect (window, "destroy", G_CALLBACK (freeBoard), board);
 }
+
 
 int main (int argc, char** argv)
 {
