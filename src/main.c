@@ -216,7 +216,9 @@ size_t boardInit (GtkWidget* window, board_t* board)
         GtkWidget* nameLabel = gtk_label_new (board->highScore->name);
 
         gtk_grid_attach (GTK_GRID (board->grid), nameLabel, 7, 0, 1, 1);
-        gtk_grid_attach (GTK_GRID (board->grid), highScoreLabel, 8, 0, 1, 1);
+
+        // Note (DiBacco): uncomment to display the high score
+        // gtk_grid_attach (GTK_GRID (board->grid), highScoreLabel, 8, 0, 1, 1);
 
         free (highScore);
     }
